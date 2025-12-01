@@ -1,0 +1,50 @@
+Database Fundamentals
+
+A database is an organized collection of structured data stored electronically in a computer system. Databases are managed by Database Management Systems (DBMS).
+
+Types of Databases:
+
+1. Relational Databases (SQL)
+Relational databases organize data into tables with rows and columns. They use Structured Query Language (SQL) for querying and managing data.
+
+Examples: PostgreSQL, MySQL, Oracle, SQL Server
+
+Key features:
+- ACID properties (Atomicity, Consistency, Isolation, Durability)
+- Support for complex queries and joins
+- Schema enforcement
+- Strong data integrity
+
+2. NoSQL Databases
+NoSQL databases are designed for specific data models and have flexible schemas. They're optimized for specific use cases and scale horizontally.
+
+Types of NoSQL databases:
+- Document stores: MongoDB, CouchDB
+- Key-value stores: Redis, DynamoDB
+- Column-family stores: Cassandra, HBase
+- Graph databases: Neo4j, Amazon Neptune
+
+3. Vector Databases
+Vector databases are specialized for storing and querying high-dimensional vectors, commonly used in machine learning and AI applications.
+
+Examples: Pinecone, Weaviate, ChromaDB, Milvus
+
+Use cases:
+- Semantic search
+- Recommendation systems
+- Image and video similarity search
+- Question-answering systems
+
+Database Design Principles:
+
+Normalization: Process of organizing data to reduce redundancy
+- First Normal Form (1NF): Eliminate repeating groups
+- Second Normal Form (2NF): Eliminate partial dependencies
+- Third Normal Form (3NF): Eliminate transitive dependencies
+
+Indexing: Creating data structures to improve query performance
+- B-tree indexes for range queries
+- Hash indexes for equality searches
+- Full-text indexes for text search
+
+Choosing the right database depends on your application's requirements for consistency, scalability, query patterns, and data structure.
