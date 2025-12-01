@@ -19,12 +19,14 @@ A Retrieval-Augmented Generation (RAG) chatbot that answers questions using cont
 ## Installation
 
 1. **Clone the repository**:
+
    ```bash
-   git clone <repository-url>
-   cd RAG_system
+   git clone https://github.com/alikendir0/DDD_enforcer_RAG.git
+   cd DDD_enforcer_RAG
    ```
 
 2. **Create virtual environment**:
+
    ```bash
    python -m venv venv
 
@@ -36,18 +38,21 @@ A Retrieval-Augmented Generation (RAG) chatbot that answers questions using cont
    ```
 
 3. **Install dependencies**:
+
    ```bash
    pip install -r requirements.txt
    ```
 
 4. **Set environment variable**:
 
-   Create a `.env` file in the project root:
+   Create a new Enviorment Variable accordingly:
+
    ```
    GEMINI_API_KEY=your-api-key-here
    ```
 
    Or set it directly:
+
    ```bash
    # Windows (PowerShell)
    $env:GEMINI_API_KEY = "your-api-key-here"
@@ -61,8 +66,9 @@ A Retrieval-Augmented Generation (RAG) chatbot that answers questions using cont
 1. **Add documents** to `data/documents/` folder
 
 2. **Run the application**:
+
    ```bash
-   python src/main.py
+   python -m src.main
    ```
 
 3. **Open your browser** to the URL shown (typically `http://127.0.0.1:7860`)
@@ -92,6 +98,7 @@ RAG_system/
 ## Configuration
 
 Edit `config/settings.py` to customize:
+
 - Document folder location
 - Chunk size (default: 512 tokens)
 - Number of retrieved chunks (default: 3-5)
@@ -137,37 +144,36 @@ See `tests/README.md` for detailed testing documentation.
 ## Troubleshooting
 
 ### API Key Not Found
+
 Ensure `GEMINI_API_KEY` environment variable is set before running the application.
 Check `.env.example` for the correct format.
 
 ### PDF Parsing Fails
+
 Some PDFs (scanned images) don't have extractable text. Convert to text-based PDF first.
 For encrypted PDFs, remove password protection before indexing.
 
 ### Slow Indexing
+
 Large documents take time to process. Check console for progress logs.
 The first run also downloads the embedding model (~80MB), which may take a few minutes.
 
 ### Poor Answer Quality
+
 - Ensure documents contain relevant information
 - Try adjusting the number of retrieved chunks in settings (TOP_K_DEFAULT)
 - Check retrieval logs for similarity scores
 - Ensure your documents are well-structured and readable
 
 ### Memory Errors
+
 If you encounter memory errors during indexing:
+
 - Index documents in batches (remove some documents from folder)
 - Increase system RAM
 - Reduce chunk size in settings (trade-off: may affect quality)
 
 ### Conversation History Not Working
+
 Ensure you're in the same browser session. Refreshing the page starts a new session.
 Conversation history is not persisted across application restarts.
-
-## License
-
-[Your License Here]
-
-## Contributing
-
-[Contributing Guidelines Here]
