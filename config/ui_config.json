@@ -1,7 +1,7 @@
 {
-  "top_k": 3,
-  "chunk_size": 512,
-  "chunk_overlap": 0,
+  "top_k": 10,
+  "chunk_size": 640,
+  "chunk_overlap": 32,
   "show_context_enabled": true,
-  "last_modified": 1764707626.1170409
+  "last_modified": 1764710080.7630668
 }
