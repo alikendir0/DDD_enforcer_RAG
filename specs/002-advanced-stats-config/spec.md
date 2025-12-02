@@ -7,6 +7,27 @@
 
 Enhance the RAG chatbot interface with advanced analytics, configuration controls, and file management capabilities. Users need transparency into system resource usage, costs, and the ability to fine-tune retrieval parameters without code changes. Power users require visibility into which documents and chunks influence each response, while all users need a simple way to manage their document corpus through the interface.
 
+
+## Clarifications
+
+### Session 2025-12-01
+- Q: How should users access the configuration menu? → A: At the top of the file management/upload interface
+- Q: Where should the file management interface be located? → A: Separate tab/page alongside the main chat interface
+- Q: Should statistics reset when the user refreshes the page/tab? → A: Yes, page refresh resets statistics (new session starts)
+- Q: What is the acceptable latency for statistics updates after a query completes? → A: Under 200 milliseconds
+
+- Q: Where should the statistics panel be positioned in relation to the existing chat interface? → A: Side panel (drawer/sidebar that slides in from right or left)
+
+## Clarifications
+
+### Session 2025-12-01
+- Q: How should users access the configuration menu? → A: At the top of the file management/upload interface
+- Q: Where should the file management interface be located? → A: Separate tab/page alongside the main chat interface
+- Q: Should statistics reset when the user refreshes the page/tab? → A: Yes, page refresh resets statistics (new session starts)
+- Q: What is the acceptable latency for statistics updates after a query completes? → A: Under 200 milliseconds
+
+- Q: Where should the statistics panel be positioned in relation to the existing chat interface? → A: Side panel (drawer/sidebar that slides in from right or left)
+
 ## User Scenarios & Testing
 
 ### User Story 1: Monitoring System Usage and Costs (P1)
@@ -197,7 +218,7 @@ Scenario: Identify embedded vs non-embedded files
 
 ### Statistics Panel (FR-SP)
 
-**FR-SP-001**: System SHALL provide a toggleable statistics panel accessible from the main interface
+**FR-SP-001**: System SHALL provide a toggleable statistics side panel (drawer/sidebar) that slides in from the side of the interface without obstructing the main chat area
 **FR-SP-002**: Panel SHALL display real-time token usage broken down by input tokens and output tokens
 **FR-SP-003**: Panel SHALL calculate and display estimated cost based on the current AI model's pricing
 **FR-SP-004**: Panel SHALL show the count of files currently embedded in the vector database
@@ -205,16 +226,23 @@ Scenario: Identify embedded vs non-embedded files
 **FR-SP-006**: Panel SHALL track and display average tokens per query for the current session
 **FR-SP-007**: Panel SHALL count and display total queries processed in the current session
 **FR-SP-008**: Statistics SHALL persist when panel is toggled closed and reopened
-**FR-SP-009**: Statistics SHALL reset when user starts a new session
+**FR-SP-009**: Statistics SHALL reset when user starts a new session (including page refresh or tab close/reopen)
+**FR-SP-010**: Statistics panel SHALL slide in from the right or left side of the screen when opened
+**FR-SP-011**: Panel SHALL remain accessible while users interact with the chat interface
+**FR-SP-012**: Panel SHALL have a close button or mechanism to dismiss it back off-screen
+
+**FR-SP-010**: Statistics panel SHALL slide in from the right or left side of the screen when opened
+**FR-SP-011**: Panel SHALL remain accessible while users interact with the chat interface
+**FR-SP-012**: Panel SHALL have a close button or mechanism to dismiss it back off-screen
 
 **Assumptions**:
-- Session is defined as the browser tab's lifetime
+- Session is defined as the browser tab's lifetime; closing, refreshing, or reloading the tab starts a new session
 - Model pricing is configured in application settings
 - Token counting uses the same method as the AI API
 
 ### Configuration Menu (FR-CM)
 
-**FR-CM-001**: System SHALL provide a configuration menu for adjusting RAG parameters
+**FR-CM-001**: System SHALL provide a configuration menu located at the top of the file management interface for adjusting RAG parameters
 **FR-CM-002**: Menu SHALL allow setting top-k value between 1 and 10 (inclusive)
 **FR-CM-003**: Menu SHALL allow setting chunk size between 256 and 1024 tokens (inclusive)
 **FR-CM-004**: Menu SHALL allow setting chunk overlap between 0 and 256 tokens (inclusive)
@@ -224,6 +252,8 @@ Scenario: Identify embedded vs non-embedded files
 **FR-CM-008**: Menu SHALL provide descriptions explaining the impact of each parameter
 **FR-CM-009**: Menu SHALL include a "Reset to Defaults" button that restores original values
 **FR-CM-010**: Configuration changes SHALL be saved to browser storage and persist across sessions
+**FR-CM-011**: Configuration menu SHALL be accessible from the file management interface header area
+**FR-CM-012**: Menu SHALL be clearly labeled and visually distinct from file upload controls
 
 **Assumptions**:
 - Default values: top-k=3, chunk-size=512, overlap=0
@@ -248,7 +278,7 @@ Scenario: Identify embedded vs non-embedded files
 
 ### File Management (FR-FM)
 
-**FR-FM-001**: System SHALL display a list of all files in the data/documents directory
+**FR-FM-001**: System SHALL provide a separate tab or page for file management that displays a list of all files in the data/documents directory
 **FR-FM-002**: File list SHALL show filename, file type, file size, embedding status, and last modified date for each file
 **FR-FM-003**: System SHALL allow users to upload new documents through a file selection dialog
 **FR-FM-004**: System SHALL validate uploaded file types and only accept PDF, TXT, MD, and DOCX formats
@@ -258,6 +288,8 @@ Scenario: Identify embedded vs non-embedded files
 **FR-FM-008**: System SHALL indicate which files are currently embedded in the vector database
 **FR-FM-009**: System SHALL allow users to trigger document re-indexing from the file management interface
 **FR-FM-010**: Non-embedded files SHALL be visually distinguished from embedded files
+**FR-FM-011**: File management interface SHALL be accessible via a navigation tab separate from the chat interface
+**FR-FM-012**: Users SHALL be able to switch between chat and file management views without losing state in either view
 
 **Assumptions**:
 - Maximum file size: 50MB per file
@@ -277,7 +309,7 @@ Scenario: Identify embedded vs non-embedded files
 
 **SC-005 - Configuration Persistence**: User configuration changes persist across browser sessions, maintaining customized settings
 
-**SC-006 - Real-Time Feedback**: Statistics update immediately after each query, providing live feedback on resource consumption
+**SC-006 - Real-Time Feedback**: Statistics update within 200 milliseconds after each query completes, providing near-instantaneous feedback on resource consumption
 
 **SC-007 - Usability**: 90% of users can successfully adjust RAG parameters and understand their impact without external documentation
 
@@ -396,3 +428,18 @@ Scenario: Identify embedded vs non-embedded files
 **Specification Version**: 1.0
 **Last Updated**: 2025-12-01
 **Next Phase**: Run `/speckit.plan` to generate implementation plan
+
+## Non-Functional Requirements
+
+### Performance
+
+**NFR-001**: Statistics panel SHALL update within 200 milliseconds of query completion
+**NFR-002**: Configuration changes SHALL apply to the next query without requiring page reload
+**NFR-003**: File list SHALL load and display within 2 seconds for up to 100 files
+**NFR-004**: File upload progress indicator SHALL update at least every 500 milliseconds
+
+### Usability
+
+**NFR-005**: All UI controls SHALL be keyboard-accessible for users who cannot use a mouse
+**NFR-006**: Statistics panel SHALL not reduce the chat interface width by more than 30% when open
+**NFR-007**: Error messages SHALL be displayed in plain language without technical jargon
