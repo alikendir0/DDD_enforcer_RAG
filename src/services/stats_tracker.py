@@ -153,13 +153,13 @@ class StatsTracker:
             if not results or 'metadatas' not in results:
                 return 0
 
-            # Extract unique document names
-            document_names = set()
+            # Extract unique document paths
+            document_paths = set()
             for metadata in results['metadatas']:
-                if metadata and 'document_name' in metadata:
-                    document_names.add(metadata['document_name'])
+                if metadata and 'document_path' in metadata:
+                    document_paths.add(metadata['document_path'])
 
-            return len(document_names)
+            return len(document_paths)
 
         except Exception as e:
             logger.error(f"Failed to get embedded file count: {e}")

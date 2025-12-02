@@ -32,6 +32,7 @@ generator: Optional[Generator] = None
 conversation_manager: Optional[ConversationManager] = None
 stats_tracker = None  # Will be initialized after vector_store
 config_manager = None  # Will be initialized with configuration loading
+file_manager = None  # Will be initialized with vector_store reference
 
 
 def initialize_services():
@@ -41,9 +42,13 @@ def initialize_services():
     Raises:
         ValueError: If GEMINI_API_KEY is not set
     """
-    global embedder, vector_store, retriever, generator, conversation_manager, stats_tracker, config_manager
+    global embedder, vector_store, retriever, generator, conversation_manager, stats_tracker, config_manager, file_manager
 
     logger.info("Initializing RAG Chatbot services...")
+
+    # Ensure data/documents/ directory exists on startup (T047)
+    DOCUMENTS_FOLDER.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Documents directory ensured: {DOCUMENTS_FOLDER}")
 
     # Check API key
     if not GEMINI_API_KEY:
@@ -76,6 +81,13 @@ def initialize_services():
     from src.services.config_manager import ConfigManager
     config_manager = ConfigManager()
     config_manager.load_config()
+
+    # Initialize file manager with vector store reference
+    from src.services.file_manager import FileManager
+    file_manager = FileManager(
+        documents_folder=str(DOCUMENTS_FOLDER),
+        vector_store=vector_store
+    )
 
     logger.info("All services initialized successfully")
 
@@ -125,6 +137,10 @@ def index_documents(
         documents_folder = str(DOCUMENTS_FOLDER)
 
     logger.info(f"Starting document indexing from: {documents_folder}")
+
+    # Clear existing embeddings before re-indexing
+    logger.info("Clearing existing embeddings from vector store...")
+    vector_store.clear()
 
     # Verify folder exists
     folder_path = Path(documents_folder)
@@ -228,8 +244,11 @@ def index_documents(
 
 
 def answer_query(
-    query_text: str, session_id: str = "default", top_k: Optional[int] = None
-) -> str:
+    query_text: str,
+    session_id: str = "default",
+    top_k: Optional[int] = None,
+    return_context: bool = False
+) -> tuple[str, list[dict]] | str:
     """
     Answer a user query using RAG pipeline with conversation history.
 
@@ -240,15 +259,17 @@ def answer_query(
     4. Generate response with context and history
     5. Track statistics (token usage, costs)
     6. Add exchange to conversation
-    7. Return response text
+    7. Return response text (and optionally context metadata)
 
     Args:
         query_text: User's question
         session_id: Session identifier (for conversation history)
         top_k: Number of chunks to retrieve (overrides config if provided)
+        return_context: If True, return (response_text, context_metadata)
 
     Returns:
-        Response text to display to user
+        Response text to display to user, or tuple of (response_text, context_metadata)
+        context_metadata is a list of dicts with chunk_text, score, document_name
     """
     global vector_store, retriever, generator, conversation_manager, stats_tracker, config_manager
 
@@ -332,11 +353,14 @@ def answer_query(
         conversation_manager.add_message(session_id, "user", query_text)
         conversation_manager.add_message(session_id, "assistant", response.content)
 
-        # Log retrieval metadata
+        # Log retrieval metadata (NFR-008: Constitution compliance)
         if chunks:
+            chunk_ids = [chunk.chunk_id for chunk in chunks]
             logger.info(
-                f"Retrieved {len(chunks)} chunks with scores: "
-                f"{[f'{s:.3f}' for s in scores]}"
+                f"Retrieval operation - Query: '{query_text[:50]}...', "
+                f"Retrieved {len(chunks)} chunks (IDs: {chunk_ids}), "
+                f"Similarity scores: {[f'{s:.3f}' for s in scores]}, "
+                f"Timestamp: {query.timestamp}"
             )
 
         logger.debug(
@@ -344,15 +368,33 @@ def answer_query(
             f"(total messages: {len(conversation_history) + 2})"
         )
 
+        # Build context metadata if requested
+        if return_context and chunks:
+            import os
+            context_metadata = []
+            for chunk, score in zip(chunks, scores):
+                # Extract just the filename from the full path
+                filename = os.path.basename(chunk.document_path)
+                context_metadata.append({
+                    "chunk_text": chunk.content,
+                    "score": float(score),
+                    "document_name": filename,
+                    "chunk_index": chunk.chunk_index
+                })
+            return response.content, context_metadata
+
         return response.content
 
     except Exception as e:
         error_msg = f"Error processing query: {e}"
         logger.error(error_msg, exc_info=True)
-        return (
+        error_response = (
             "I apologize, but I encountered an error processing your question. "
             "Please try again or rephrase your question."
         )
+        if return_context:
+            return error_response, []
+        return error_response
 
 
 def main():

@@ -136,18 +136,26 @@ class Generator:
 
         # Add system instruction
         prompt_parts.append(
-            "You are a helpful assistant that answers questions based on the provided context. "
-            "If the context contains relevant information, use it in your answer. "
-            "If the context doesn't contain relevant information, answer using your general knowledge "
-            "and mention that the information isn't in the provided documents."
+            "You are a knowledgeable assistant that answers questions strictly based on the provided document context. "
+            "Your task is to:\n"
+            "1. Carefully read and analyze the provided document excerpts\n"
+            "2. Answer the question using ONLY information found in these excerpts\n"
+            "3. If the answer is in the context, provide a clear and complete response\n"
+            "4. If the context doesn't contain enough information to answer the question, respond with: "
+            "\"I cannot find information about this in the provided documents.\"\n"
+            "5. Never use external knowledge or make assumptions beyond what's explicitly stated in the context\n"
+            "6. When referencing information, be specific about which document excerpt it came from"
         )
 
         # Add context chunks
         if context_chunks:
             prompt_parts.append("\n\nContext from documents:")
             for i, chunk in enumerate(context_chunks, 1):
+                # Extract just the filename from the full path
+                import os
+                filename = os.path.basename(chunk.document_path)
                 prompt_parts.append(
-                    f"\n--- Document excerpt {i} (from {chunk.document_path}) ---"
+                    f"\n--- Document excerpt {i} (from {filename}, chunk {chunk.chunk_index}) ---"
                 )
                 prompt_parts.append(chunk.content)
 

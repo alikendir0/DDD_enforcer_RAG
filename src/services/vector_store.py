@@ -74,19 +74,28 @@ class VectorStore:
         # Prepare data for ChromaDB
         ids = [emb.chunk_id for emb in embeddings]
         vectors = [emb.vector for emb in embeddings]
+        
+        # Store full content as documents (no size limit)
+        documents = [chunk.content for chunk in chunks]
+        
+        # Store only metadata (not content, to avoid size limits)
         metadatas: List[Dict[str, Any]] = [
             {
                 "chunk_id": chunk.chunk_id,
                 "document_path": chunk.document_path,
                 "chunk_index": chunk.chunk_index,
                 "token_count": chunk.token_count,
-                "content": chunk.content[:500],  # Store first 500 chars for display
             }
             for chunk in chunks
         ]
 
-        # Add to collection
-        self.collection.add(embeddings=vectors, metadatas=metadatas, ids=ids)  # type: ignore
+        # Add to collection with documents parameter for full content
+        self.collection.add(
+            embeddings=vectors, 
+            metadatas=metadatas, 
+            ids=ids,
+            documents=documents  # Full content stored here
+        )  # type: ignore
 
         logger.info(f"Added {len(embeddings)} embeddings to vector store")
 
@@ -98,7 +107,7 @@ class VectorStore:
 
         Args:
             query_embedding: Query vector (384-dim)
-            top_k: Number of results to return (3-5)
+            top_k: Number of results to return (1-10)
 
         Returns:
             Tuple of (retrieved_chunks, similarity_scores)
@@ -107,15 +116,17 @@ class VectorStore:
             logger.warning("Empty query embedding")
             return [], []
 
-        if top_k < 1 or top_k > 5:
-            logger.warning(f"top_k={top_k} outside recommended range [3,5], clamping")
-            top_k = max(3, min(5, top_k))
+        if top_k < 1 or top_k > 10:
+            logger.warning(f"top_k={top_k} outside valid range [1,10], clamping")
+            top_k = max(1, min(10, top_k))
         
         assert self.collection is not None
 
-        # Query ChromaDB
+        # Query ChromaDB - include documents to get full content
         results = self.collection.query(
-            query_embeddings=[query_embedding], n_results=top_k
+            query_embeddings=[query_embedding], 
+            n_results=top_k,
+            include=['metadatas', 'documents', 'distances']
         )
 
         if not results["ids"] or not results["ids"][0]:
@@ -126,23 +137,27 @@ class VectorStore:
         chunk_ids = results["ids"][0]
         distances = cast(List[float], results["distances"][0]) if results["distances"] else []
         metadatas = cast(List[Dict[str, Any]], results["metadatas"][0]) if results["metadatas"] else []
+        documents = results.get("documents", [[]])[0] if results.get("documents") else []
 
         # Convert distances to similarity scores (cosine similarity)
         # ChromaDB returns L2 distance for cosine, need to convert
         # Similarity = 1 - (distance / 2) for normalized vectors
         similarities = [1 - (d / 2) for d in distances]
 
-        # Reconstruct Chunk objects from metadata
+        # Reconstruct Chunk objects from metadata and documents
         chunks = []
-        for metadata in metadatas:
+        for i, metadata in enumerate(metadatas):
+            # Get full content from documents field
+            content = documents[i] if i < len(documents) else ""
+            
             chunk = Chunk(
                 chunk_id=str(metadata["chunk_id"]),
                 document_path=str(metadata["document_path"]),
                 chunk_index=int(metadata["chunk_index"]),
-                content=str(metadata.get("content", "")),
+                content=str(content),  # Full content from documents field
                 token_count=int(metadata["token_count"]),
                 start_char=0,  # Not stored in metadata
-                end_char=len(str(metadata.get("content", ""))),
+                end_char=len(str(content)),
             )
             chunks.append(chunk)
 

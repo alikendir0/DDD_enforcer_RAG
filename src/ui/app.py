@@ -63,6 +63,39 @@ def handle_indexing():
         return error_msg
 
 
+def format_context_html(context_metadata):
+    """
+    Format retrieval context as collapsible HTML using <details> tag.
+
+    Args:
+        context_metadata: List of dicts with chunk_text, score, document_name, chunk_index
+
+    Returns:
+        HTML string with formatted context
+    """
+    if not context_metadata:
+        return ""
+
+    html_parts = ["\n\n---\n\n**Retrieved Context:**\n\n"]
+
+    for i, ctx in enumerate(context_metadata, 1):
+        score = ctx['score']
+        doc_name = ctx['document_name']
+        chunk_idx = ctx.get('chunk_index', '?')
+        chunk_text = ctx['chunk_text']
+
+        # Create collapsible section for each chunk
+        html_parts.append(
+            f"<details>\n"
+            f"<summary><b>Chunk {i}</b> from <code>{doc_name}</code> "
+            f"(chunk #{chunk_idx}, similarity: {score:.3f})</summary>\n\n"
+            f"{chunk_text}\n\n"
+            f"</details>\n\n"
+        )
+
+    return "".join(html_parts)
+
+
 def handle_chat(message, history, session_state):
     """
     Handle chat message from user.
@@ -73,7 +106,7 @@ def handle_chat(message, history, session_state):
         session_state: Session ID state
 
     Returns:
-        Response text
+        Response text with optional context
     """
     try:
         # Handle both string and dict message formats
@@ -88,8 +121,26 @@ def handle_chat(message, history, session_state):
 
         logger.debug(f"Processing chat message for session: {session_id}")
 
+        # Check if context display is enabled
+        show_context = False
+        if src.main.config_manager:
+            config = src.main.config_manager.get_current_config()
+            show_context = config.show_context_enabled
+
         # Call answer_query function with session ID
-        response = answer_query(query_text=query_text, session_id=session_id)
+        if show_context:
+            response, context_metadata = answer_query(
+                query_text=query_text,
+                session_id=session_id,
+                return_context=True
+            )
+            # Append formatted context to response
+            if context_metadata:
+                context_html = format_context_html(context_metadata)
+                response = response + context_html
+        else:
+            response = answer_query(query_text=query_text, session_id=session_id)
+
         return response
 
     except Exception as e:
@@ -134,6 +185,10 @@ def save_configuration(top_k, chunk_size, chunk_overlap, show_context):
         Status message
     """
     try:
+        # Ensure services are initialized
+        if not src.main.config_manager:
+            src.main.initialize_services()
+        
         if not src.main.config_manager:
             return "Configuration manager not initialized"
 
@@ -172,6 +227,10 @@ def reset_configuration():
         Tuple of (status_message, top_k, chunk_size, chunk_overlap, show_context)
     """
     try:
+        # Ensure services are initialized
+        if not src.main.config_manager:
+            src.main.initialize_services()
+        
         if not src.main.config_manager:
             return "Configuration manager not initialized", 3, 512, 0, False
 
@@ -207,6 +266,10 @@ def initialize_session():
         Tuple of (top_k, chunk_size, chunk_overlap, show_context)
     """
     try:
+        # Ensure services are initialized
+        if not src.main.config_manager:
+            src.main.initialize_services()
+        
         if not src.main.config_manager:
             return 3, 512, 0, False
 
@@ -216,6 +279,127 @@ def initialize_session():
     except Exception as e:
         logger.error(f"Error loading configuration: {e}", exc_info=True)
         return 3, 512, 0, False
+
+
+def load_file_list():
+    """
+    Load and format the file list for display.
+
+    Returns:
+        List of rows for Gradio Dataframe
+    """
+    try:
+        if not src.main.file_manager:
+            return []
+
+        documents = src.main.file_manager.list_documents()
+        rows = src.main.file_manager.format_for_gradio_table(documents)
+
+        logger.debug(f"Loaded {len(rows)} files for display")
+        return rows
+
+    except Exception as e:
+        logger.error(f"Error loading file list: {e}", exc_info=True)
+        return []
+
+
+def on_file_upload(files):
+    """
+    Handle file upload from Gradio component.
+
+    Args:
+        files: Single file path or list of file paths from Gradio
+
+    Returns:
+        Tuple of (upload_status_message, updated_file_list)
+    """
+    try:
+        if not src.main.file_manager:
+            return "File manager not initialized", load_file_list()
+
+        if not files:
+            return "No files selected", load_file_list()
+
+        # Handle file upload using new FileManager signature
+        success, message, updated_list = src.main.file_manager.handle_file_upload(files)
+
+        # Format message with emoji
+        if success:
+            status_msg = f"✅ {message}"
+        else:
+            status_msg = f"❌ {message}"
+
+        logger.info(f"File upload completed: {message}")
+
+        return status_msg, updated_list
+
+    except Exception as e:
+        error_msg = f"Error handling file upload: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return error_msg, load_file_list()
+
+
+def trigger_indexing():
+    """
+    Trigger document indexing with current configuration.
+
+    Returns:
+        Status message from indexing operation
+    """
+    try:
+        if not src.main.config_manager:
+            return "Configuration manager not initialized"
+
+        # Get current configuration
+        config = src.main.config_manager.get_current_config()
+
+        logger.info("Starting indexing from UI with config: " +
+                   f"chunk_size={config.chunk_size}, chunk_overlap={config.chunk_overlap}")
+
+        # Call index_documents with configuration
+        status = index_documents(
+            chunk_size=config.chunk_size,
+            chunk_overlap=config.chunk_overlap
+        )
+
+        # Format result message (same as handle_indexing)
+        if status.total_documents == 0:
+            return (
+                "No documents found in the documents folder.\n\n"
+                "Please upload files using the File Management section above."
+            )
+
+        if status.indexed_documents == 0:
+            return (
+                f"Indexing failed: 0/{status.total_documents} documents indexed.\n\n"
+                f"Failed: {status.failed_documents} documents\n"
+                "Check logs for error details."
+            )
+
+        success_rate = (
+            status.indexed_documents / status.total_documents * 100
+            if status.total_documents > 0
+            else 0
+        )
+
+        result_msg = (
+            f"Indexing complete!\n\n"
+            f"Documents indexed: {status.indexed_documents}/{status.total_documents} "
+            f"({success_rate:.1f}% success)\n"
+            f"Total chunks: {status.total_chunks}\n"
+            f"Failed: {status.failed_documents} documents\n\n"
+            f"You can now ask questions about your documents!"
+        )
+
+        if status.failed_documents > 0:
+            result_msg += "\n\nSome documents failed to index. Check logs for details."
+
+        return result_msg
+
+    except Exception as e:
+        error_msg = f"Error during indexing: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return error_msg
 
 
 def create_interface():
@@ -261,6 +445,31 @@ def create_interface():
                         with gr.Row():
                             submit_btn = gr.Button("Submit", variant="primary")
                             clear_btn = gr.Button("Clear Chat")
+
+                        # Example queries section
+                        with gr.Accordion("💡 Example Questions", open=True):
+                            gr.Markdown(
+                                """
+                                Try these example queries based on the sample documents:
+
+                                **Python Programming:**
+                                - "What are the basic data types in Python?"
+                                - "How do I handle errors in Python?"
+                                - "What are the best practices for Python development?"
+
+                                **Machine Learning:**
+                                - "What is the difference between supervised and unsupervised learning?"
+                                - "How do I prevent overfitting in machine learning models?"
+                                - "What metrics should I use for classification problems?"
+
+                                **Data Science:**
+                                - "What is the data science workflow?"
+                                - "How should I handle missing values in my dataset?"
+                                - "What tools are commonly used in data science?"
+
+                                💡 *Tip: Click "Index Documents" in the File Management tab first to enable these questions!*
+                                """
+                            )
 
                     with gr.Column(scale=1):
                         # Statistics accordion in chat tab
@@ -323,10 +532,44 @@ def create_interface():
 
                 gr.Markdown("---")
 
+                # File upload section
+                gr.Markdown("### File Management")
+                gr.Markdown("Upload documents or manage existing files in your corpus.")
+
+                with gr.Row():
+                    file_upload = gr.File(
+                        label="Upload Documents",
+                        file_count="multiple",
+                        file_types=[".pdf", ".txt", ".md", ".docx"],
+                        type="filepath"
+                    )
+
+                upload_status = gr.Textbox(
+                    label="Upload Status",
+                    placeholder="Select files to upload...",
+                    lines=2,
+                    interactive=False
+                )
+
+                # File list table
+                gr.Markdown("### Document Library")
+
+                file_list_table = gr.Dataframe(
+                    headers=["Filename", "Type", "Size", "Status", "Modified", "Chunks"],
+                    datatype=["str", "str", "str", "str", "str", "str"],
+                    label="Documents",
+                    interactive=False,
+                    wrap=True
+                )
+
+                refresh_files_btn = gr.Button("Refresh File List", size="sm")
+
+                gr.Markdown("---")
+
                 gr.Markdown(
                     """
                     **Document Indexing:**
-                    Place your documents in the `data/documents/` folder and click "Index Documents" to process them.
+                    Click "Index Documents" to process all files in your document library.
 
                     **Supported formats:** .txt, .md, .pdf, .docx
                     """
@@ -405,8 +648,8 @@ def create_interface():
             outputs=[detailed_stats_json]
         )
 
-        # Indexing button
-        index_btn.click(fn=handle_indexing, outputs=status_box)
+        # Indexing button - now using trigger_indexing with config
+        index_btn.click(fn=trigger_indexing, outputs=status_box)
 
         # Configuration buttons
         save_config_btn.click(
@@ -420,10 +663,33 @@ def create_interface():
             outputs=[config_status, top_k_slider, chunk_size_slider, chunk_overlap_slider, show_context_checkbox]
         )
 
-        # Initialize statistics and configuration on load
-        # Note: Simplified to avoid hanging during interface creation
+        # File management event handlers
+        file_upload.change(
+            fn=on_file_upload,
+            inputs=[file_upload],
+            outputs=[upload_status, file_list_table]
+        )
+
+        refresh_files_btn.click(
+            fn=load_file_list,
+            outputs=[file_list_table]
+        )
+
+        # Load file list when switching to File Management tab
+        def load_file_management_data(tab_id):
+            if tab_id == "file_tab":
+                return load_file_list()
+            return None
+
+        main_tabs.select(
+            fn=load_file_management_data,
+            inputs=[main_tabs],
+            outputs=[file_list_table]
+        )
+
+        # Initialize configuration on load
         app.load(
-            fn=lambda: (3, 512, 0, False),
+            fn=initialize_session,
             outputs=[top_k_slider, chunk_size_slider, chunk_overlap_slider, show_context_checkbox]
         )
 
