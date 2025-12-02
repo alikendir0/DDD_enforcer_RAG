@@ -53,7 +53,7 @@ class Generator:
         query: str,
         context_chunks: List[Chunk],
         conversation_history: Optional[List[dict]] = None,
-    ) -> Response:
+    ) -> tuple[Response, int, int]:
         """
         Generate response using Gemini API with context.
 
@@ -63,7 +63,7 @@ class Generator:
             conversation_history: Previous messages (for multi-turn)
 
         Returns:
-            Response object with generated answer
+            Tuple of (Response object, input_tokens, output_tokens)
 
         Raises:
             GeneratorError: If API call fails after retries
@@ -74,14 +74,14 @@ class Generator:
             # Build prompt with context
             prompt = self._build_prompt(query, context_chunks, conversation_history)
 
-            # Call Gemini API with retry logic
-            response_text = self._call_gemini_with_retry(prompt)
+            # Call Gemini API with retry logic and get token counts
+            response_text, input_tokens, output_tokens = self._call_gemini_with_retry(prompt)
 
             # Calculate latency
             latency_ms = int((time.time() - start_time) * 1000)
 
-            # Estimate token count (rough approximation)
-            token_count = len(response_text.split())
+            # Use actual token count from API
+            token_count = output_tokens
 
             response = Response(
                 query_id="",  # Will be set by caller
@@ -94,25 +94,26 @@ class Generator:
 
             logger.info(
                 f"Generated response: {len(response_text)} chars, "
-                f"{latency_ms}ms latency"
+                f"{latency_ms}ms latency, "
+                f"{input_tokens} input tokens, {output_tokens} output tokens"
             )
 
-            return response
+            return response, input_tokens, output_tokens
 
         except Exception as e:
             latency_ms = int((time.time() - start_time) * 1000)
             error_msg = f"Failed to generate response: {str(e)}"
             logger.error(error_msg, exc_info=True)
 
-            # Return error response
-            return Response(
+            # Return error response with zero tokens
+            return (Response(
                 query_id="",
                 content="I apologize, but I encountered an error generating a response. Please try again.",
                 model_name=self.model_name,
                 latency_ms=latency_ms,
                 token_count=0,
                 error=error_msg,
-            )
+            ), 0, 0)
 
     def _build_prompt(
         self,
@@ -164,7 +165,7 @@ class Generator:
 
         return "".join(prompt_parts)
 
-    def _call_gemini_with_retry(self, prompt: str, max_retries: int = 3) -> str:
+    def _call_gemini_with_retry(self, prompt: str, max_retries: int = 3) -> tuple[str, int, int]:
         """
         Call Gemini API with exponential backoff retry.
 
@@ -175,7 +176,7 @@ class Generator:
             max_retries: Maximum number of retry attempts
 
         Returns:
-            Generated response text
+            Tuple of (response_text, input_tokens, output_tokens)
 
         Raises:
             GeneratorError: If all retries fail
@@ -189,7 +190,21 @@ class Generator:
                 if not response or not response.text:
                     raise GeneratorError("Empty response from Gemini API")
 
-                return response.text
+                # Extract token counts from usage_metadata if available
+                input_tokens = 0
+                output_tokens = 0
+                if hasattr(response, 'usage_metadata'):
+                    usage = response.usage_metadata
+                    input_tokens = getattr(usage, 'prompt_token_count', 0)
+                    output_tokens = getattr(usage, 'candidates_token_count', 0)
+                    logger.debug(f"Token usage: {input_tokens} input, {output_tokens} output")
+                else:
+                    # Fallback to estimation if usage_metadata not available
+                    logger.warning("usage_metadata not available, estimating token counts")
+                    input_tokens = len(prompt.split()) // 0.75  # rough estimate
+                    output_tokens = len(response.text.split()) // 0.75
+
+                return response.text, int(input_tokens), int(output_tokens)
 
             except Exception as e:
                 last_error = e

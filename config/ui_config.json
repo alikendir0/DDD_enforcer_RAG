@@ -1,0 +1,7 @@
+{
+  "top_k": 5,
+  "chunk_size": 768,
+  "chunk_overlap": 64,
+  "show_context_enabled": true,
+  "last_modified": 1764683115.3493376
+}

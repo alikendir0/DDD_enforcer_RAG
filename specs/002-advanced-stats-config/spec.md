@@ -16,17 +16,7 @@ Enhance the RAG chatbot interface with advanced analytics, configuration control
 - Q: Should statistics reset when the user refreshes the page/tab? → A: Yes, page refresh resets statistics (new session starts)
 - Q: What is the acceptable latency for statistics updates after a query completes? → A: Under 200 milliseconds
 
-- Q: Where should the statistics panel be positioned in relation to the existing chat interface? → A: Side panel (drawer/sidebar that slides in from right or left)
-
-## Clarifications
-
-### Session 2025-12-01
-- Q: How should users access the configuration menu? → A: At the top of the file management/upload interface
-- Q: Where should the file management interface be located? → A: Separate tab/page alongside the main chat interface
-- Q: Should statistics reset when the user refreshes the page/tab? → A: Yes, page refresh resets statistics (new session starts)
-- Q: What is the acceptable latency for statistics updates after a query completes? → A: Under 200 milliseconds
-
-- Q: Where should the statistics panel be positioned in relation to the existing chat interface? → A: Side panel (drawer/sidebar that slides in from right or left)
+- Q: Where should the statistics panel be positioned in relation to the existing chat interface? → A: Side panel (drawer/sidebar that slides in from right or left) - **IMPLEMENTATION UPDATE**: Changed to accordion within Chat tab + dedicated Statistics tab for simplicity per Constitution Principle III
 
 ## User Scenarios & Testing
 
@@ -227,13 +217,9 @@ Scenario: Identify embedded vs non-embedded files
 **FR-SP-007**: Panel SHALL count and display total queries processed in the current session
 **FR-SP-008**: Statistics SHALL persist when panel is toggled closed and reopened
 **FR-SP-009**: Statistics SHALL reset when user starts a new session (including page refresh or tab close/reopen)
-**FR-SP-010**: Statistics panel SHALL slide in from the right or left side of the screen when opened
-**FR-SP-011**: Panel SHALL remain accessible while users interact with the chat interface
-**FR-SP-012**: Panel SHALL have a close button or mechanism to dismiss it back off-screen
-
-**FR-SP-010**: Statistics panel SHALL slide in from the right or left side of the screen when opened
-**FR-SP-011**: Panel SHALL remain accessible while users interact with the chat interface
-**FR-SP-012**: Panel SHALL have a close button or mechanism to dismiss it back off-screen
+**FR-SP-010**: Statistics SHALL be accessible via an accordion component within the Chat tab and a dedicated Statistics tab
+**FR-SP-011**: Statistics accordion SHALL be collapsible without losing data, allowing users to hide/show while chatting
+**FR-SP-012**: Dedicated Statistics tab SHALL provide expanded view of all metrics without obstructing chat interface
 
 **Assumptions**:
 - Session is defined as the browser tab's lifetime; closing, refreshing, or reloading the tab starts a new session
@@ -251,14 +237,14 @@ Scenario: Identify embedded vs non-embedded files
 **FR-CM-007**: Chunk size and overlap changes SHALL display a notification that re-indexing is required
 **FR-CM-008**: Menu SHALL provide descriptions explaining the impact of each parameter
 **FR-CM-009**: Menu SHALL include a "Reset to Defaults" button that restores original values
-**FR-CM-010**: Configuration changes SHALL be saved to browser storage and persist across sessions
+**FR-CM-010**: Configuration changes SHALL be saved to server-side file storage (config/ui_config.json) and persist across sessions
 **FR-CM-011**: Configuration menu SHALL be accessible from the file management interface header area
 **FR-CM-012**: Menu SHALL be clearly labeled and visually distinct from file upload controls
 
 **Assumptions**:
 - Default values: top-k=3, chunk-size=512, overlap=0
 - Re-indexing is a manual operation triggered by the user
-- Browser localStorage is available for persisting settings
+- Server has write access to config/ directory for persisting settings to config/ui_config.json
 
 ### Context Visibility (FR-CV)
 
@@ -329,7 +315,7 @@ Scenario: Identify embedded vs non-embedded files
 1. **Existing RAG System**: This feature extends the current RAG chatbot and depends on the existing document indexing, chunking, embedding, and retrieval systems
 2. **AI Model API**: Token counting and cost calculations depend on the AI provider's API documentation for token counting methodology and pricing structure
 3. **File Storage**: File management functionality depends on server-side file system access to the data/documents directory
-4. **Browser Storage API**: Configuration persistence and statistics tracking rely on browser localStorage or sessionStorage APIs
+4. **Server File System**: Configuration persistence relies on server write access to config/ui_config.json; statistics tracking uses in-memory storage (session-scoped)
 
 ## Out of Scope
 
@@ -443,3 +429,8 @@ Scenario: Identify embedded vs non-embedded files
 **NFR-005**: All UI controls SHALL be keyboard-accessible for users who cannot use a mouse
 **NFR-006**: Statistics panel SHALL not reduce the chat interface width by more than 30% when open
 **NFR-007**: Error messages SHALL be displayed in plain language without technical jargon
+
+### Quality & Observability
+
+**NFR-008**: System SHALL log retrieval operations with query text, retrieved chunk IDs, similarity scores, and retrieval timestamp for quality analysis and debugging (Constitution II: Testability requirement)
+**NFR-009**: Statistics tracking SHALL record both successful and failed retrieval attempts to enable monitoring of retrieval quality over time
