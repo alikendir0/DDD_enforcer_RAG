@@ -123,7 +123,6 @@ class VectorStore:
             return [], []
 
         # Parse results
-        chunk_ids = results["ids"][0]
         distances = cast(List[float], results["distances"][0]) if results["distances"] else []
         metadatas = cast(List[Dict[str, Any]], results["metadatas"][0]) if results["metadatas"] else []
 

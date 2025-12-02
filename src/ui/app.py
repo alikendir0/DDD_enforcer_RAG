@@ -7,6 +7,7 @@ import time
 
 from src.main import index_documents, answer_query
 from src.utils.logger import get_logger
+from src.utils.metrics_logger import metrics_logger
 
 logger = get_logger(__name__)
 
@@ -62,6 +63,26 @@ def handle_indexing():
         return error_msg
 
 
+def _format_session_metrics(session_id: str) -> str:
+    """Render session-level metrics as Markdown for the UI panel.
+
+    The chat messages already include per-response metrics; this panel focuses
+    on aggregate totals (e.g. total token usage) for the session.
+    """
+    summary = metrics_logger.get_session_summary(session_id)
+    global_total = metrics_logger.get_global_total_tokens()
+    if summary["total_queries"] == 0 and global_total == 0:
+        return "No performance data yet. Ask a question to see metrics."
+
+    lines = [
+        "### Session Performance Metrics",
+        "",
+        f"- Total tokens used in this session (approx): **{summary['total_tokens']}**",
+        f"- Total tokens used overall (approx): **{global_total}**",
+    ]
+    return "\n".join(lines)
+
+
 def handle_chat(message, history):
     """
     Handle chat message from user.
@@ -89,7 +110,11 @@ def handle_chat(message, history):
 
         # Call answer_query function with session ID
         response = answer_query(query_text=query_text, session_id=session_id)
-        return response
+
+        # Update metrics panel for this session
+        metrics_md = _format_session_metrics(session_id)
+
+        return response, metrics_md
 
     except Exception as e:
         error_msg = f"Error: {str(e)}"
@@ -149,14 +174,22 @@ def create_interface():
             with gr.Column(scale=2):
                 gr.Markdown("### Chat Interface")
 
-                # Use ChatInterface with minimal parameters for Gradio 6.0 compatibility
-                chatbot = gr.ChatInterface(
+                # Chat interface plus performance metrics panel
+                with gr.Accordion("View Performance Metrics", open=False):
+                    metrics_box = gr.Markdown(
+                        "No performance data yet. Ask a question to see metrics.",
+                        elem_id="metrics-panel",
+                    )
+
+                # Use ChatInterface and also update the metrics panel on each query
+                gr.ChatInterface(
                     fn=handle_chat,
                     chatbot=gr.Chatbot(height=400),
                     textbox=gr.Textbox(
                         placeholder="Ask a question about your documents...",
                         container=False,
                     ),
+                    additional_outputs=[metrics_box],
                 )
 
         # Wire up indexing button

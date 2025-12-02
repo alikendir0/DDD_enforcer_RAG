@@ -1,5 +1,7 @@
-"""
-Document processing service for loading and parsing various file formats.
+"""Document processing service for loading and parsing various file formats.
+
+Implements a multi-step pipeline per document:
+1) Extract → 2) Clean → 3) Validate → 4) Analyze (external) → 5) Summarize (external).
 """
 import os
 from datetime import datetime
@@ -31,7 +33,7 @@ class ParseError(Exception):
 class DocumentProcessor:
     """Handles loading and parsing documents from various file formats."""
 
-    def load_document(self, file_path: str) -> Document:
+    def load_document(self, file_path: str, fallback_index: int | None = None) -> Document:
         """
         Load and parse a single document file.
 
@@ -59,21 +61,46 @@ class DocumentProcessor:
             )
 
         try:
-            # Extract text based on file format
+            # Step 1/2: extract and clean text based on file format
             if file_format in [".txt", ".md"]:
-                content = self._parse_text_file(path)
+                raw_content = self._parse_text_file(path)
             elif file_format == ".pdf":
-                content = self._parse_pdf(path)
+                raw_content = self._parse_pdf(path)
             elif file_format == ".docx":
-                content = self._parse_docx(path)
+                raw_content = self._parse_docx(path)
             else:
                 raise UnsupportedFormatError(f"Unsupported format: {file_format}")
+
+            content = self._clean_text(raw_content)
+
+            # Step 3: basic validation on extracted text length
+            if len(content) < 300:
+                logger.warning(
+                    "Extracted content too short for %s (len=%d), attempting basic re-parse",
+                    path.name,
+                    len(content),
+                )
+                # For now, we simply retry once for PDFs and DOCX; more
+                # advanced strategies (page batching, alternate libraries)
+                # can be added here.
+                if file_format == ".pdf":
+                    raw_content = self._parse_pdf(path)
+                elif file_format == ".docx":
+                    raw_content = self._parse_docx(path)
+                content = self._clean_text(raw_content)
+
+            # Derive a robust filename with optional fallback
+            filename = path.name if path.name else ""
+            if not filename and fallback_index is not None:
+                filename = f"Document-{fallback_index}"
+            elif not filename:
+                filename = "Document-unknown"
 
             # Create Document object
             stat = path.stat()
             document = Document(
                 file_path=str(path.absolute()),
-                filename=path.name,
+                filename=filename,
                 format=file_format,
                 size_bytes=stat.st_size,
                 content=content,
@@ -81,7 +108,15 @@ class DocumentProcessor:
                 status="pending",
             )
 
-            logger.info(f"Loaded document: {path.name} ({len(content)} characters)")
+            # Detect and attach a best-effort title for later use in prompts
+            document.title = self.detect_title(document)
+
+            logger.info(
+                "Loaded document: %s (size=%d bytes, extracted=%d chars)",
+                path.name,
+                stat.st_size,
+                len(content),
+            )
             return document
 
         except Exception as e:
@@ -121,6 +156,58 @@ class DocumentProcessor:
         except Exception as e:
             raise ParseError(f"DOCX parsing error: {e}")
 
+    def _clean_text(self, text: str) -> str:
+        """Normalize extracted text.
+
+        - Remove broken Unicode replacement chars
+        - Merge hyphenated line breaks
+        - Collapse excessive empty lines
+        """
+        if not text:
+            return ""
+
+        cleaned = text.replace("\uFFFD", "")
+
+        # Merge hyphenated line breaks: "some-
+        # thing" -> "something"
+        cleaned = cleaned.replace("-\n", "")
+
+        # Normalize line endings and collapse multiple blank lines
+        lines = cleaned.splitlines()
+        normalized_lines: List[str] = []
+        empty_run = 0
+        for line in lines:
+            stripped = line.rstrip()
+            if not stripped:
+                empty_run += 1
+                if empty_run > 1:
+                    continue
+            else:
+                empty_run = 0
+            normalized_lines.append(stripped)
+
+        return "\n".join(normalized_lines).strip()
+
+    def detect_title(self, document: Document) -> str:
+        """Best-effort title detection using simple heuristics.
+
+        - Prefer first non-empty line from the content
+        - Fallback to filename without extension
+        - If all else fails, synthesize a generic title
+        """
+        # Try first non-empty line of content
+        for line in document.content.splitlines():
+            candidate = line.strip()
+            if candidate:
+                return candidate[:120]
+
+        # Fallback to filename stem
+        path = Path(document.file_path)
+        if path.stem:
+            return path.stem
+
+        return "Untitled Document"
+
     def load_documents_from_folder(self, folder_path: str) -> List[Document]:
         """
         Load all supported documents from a folder (recursive scan).
@@ -136,16 +223,18 @@ class DocumentProcessor:
             logger.error(f"Folder not found: {folder_path}")
             return []
 
-        documents = []
+        documents: List[Document] = []
         file_count = 0
+        fallback_counter = 1
 
         # Recursively scan for supported files
         for file_path in folder.rglob("*"):
             if file_path.is_file() and file_path.suffix.lower() in SUPPORTED_FORMATS:
                 file_count += 1
                 try:
-                    document = self.load_document(str(file_path))
+                    document = self.load_document(str(file_path), fallback_index=fallback_counter)
                     documents.append(document)
+                    fallback_counter += 1
                 except Exception as e:
                     # Create failed document entry
                     logger.error(f"Failed to load {file_path.name}: {e}")

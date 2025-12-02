@@ -1,9 +1,8 @@
-"""
-Main entry point for the RAG Chatbot application.
-"""
+"""Main entry point for the RAG Chatbot application."""
 import sys
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
 
 from src.services.document_processor import DocumentProcessor, ParseError
 from src.services.chunker import Chunker
@@ -12,8 +11,9 @@ from src.services.vector_store import VectorStore
 from src.services.retriever import Retriever
 from src.services.generator import Generator
 from src.services.conversation_manager import ConversationManager
-from src.models.document import IndexingStatus
-from src.models.conversation import Query, Response
+from src.models.document import IndexingStatus, Document
+from src.models.conversation import Query, Response, QueryMetrics, IndexingMetrics
+from src.utils.metrics_logger import metrics_logger
 from src.utils.logger import get_logger
 from config.settings import (
     GEMINI_API_KEY,
@@ -100,6 +100,8 @@ def index_documents(documents_folder: Optional[str] = None) -> IndexingStatus:
 
     logger.info(f"Starting document indexing from: {documents_folder}")
 
+    indexing_start = datetime.utcnow()
+
     # Verify folder exists
     folder_path = Path(documents_folder)
     if not folder_path.exists():
@@ -135,6 +137,8 @@ def index_documents(documents_folder: Optional[str] = None) -> IndexingStatus:
     successful_docs = 0
     failed_docs = 0
     total_chunks = 0
+    total_bytes = 0
+    total_extracted_chars = 0
 
     # Process each document
     for doc in documents:
@@ -160,6 +164,8 @@ def index_documents(documents_folder: Optional[str] = None) -> IndexingStatus:
 
             successful_docs += 1
             total_chunks += len(chunks)
+            total_bytes += doc.size_bytes
+            total_extracted_chars += len(doc.content)
             logger.info(
                 f"Successfully indexed {doc.filename}: {len(chunks)} chunks"
             )
@@ -195,6 +201,15 @@ def index_documents(documents_folder: Optional[str] = None) -> IndexingStatus:
         f"Indexing complete: {successful_docs}/{total_docs} documents indexed, "
         f"{total_chunks} total chunks, {failed_docs} failed"
     )
+
+    # Attach simple timing metrics and aggregates for UI/logging
+    duration_ms = int((datetime.utcnow() - indexing_start).total_seconds() * 1000)
+    status.indexing_metrics = IndexingMetrics(
+        duration_ms=duration_ms,
+        document_count=successful_docs,
+        total_bytes=total_bytes,
+        total_extracted_chars=total_extracted_chars,
+    )  # type: ignore[attr-defined]
 
     return status
 
@@ -250,13 +265,19 @@ def answer_query(
             "No documents have been indexed yet."
         )
 
-    try:
-        # Create Query object
-        query = Query(session_id=session_id, content=query_text)
+    # Create Query object and metrics container
+    query = Query(session_id=session_id, content=query_text)
+    metrics = QueryMetrics()
+    overall_start = datetime.utcnow()
 
+    try:
         # Retrieve relevant chunks
         logger.info(f"Processing query: '{query_text[:100]}...'")
-        chunks, scores = retriever.retrieve(query_text, top_k=top_k)
+        chunks, scores, retrieval_metrics = retriever.retrieve(query_text, top_k=top_k)
+        metrics.embedding_time_ms = retrieval_metrics.embedding_time_ms
+        metrics.retrieval_time_ms = retrieval_metrics.retrieval_time_ms
+        metrics.retrieved_chunks = retrieval_metrics.retrieved_chunks
+        metrics.average_score = retrieval_metrics.average_score
 
         # Update query with retrieval results
         query.retrieved_chunk_ids = [chunk.chunk_id for chunk in chunks]
@@ -269,11 +290,29 @@ def answer_query(
         )
 
         # Generate response with conversation context
-        response = generator.generate_response(
+        response, generation_metrics = generator.generate_response(
             query=query_text,
             context_chunks=chunks,
             conversation_history=conversation_history
         )
+
+        # Simple completeness check: retry once if answer is too short
+        if len(response.content.strip()) < 120 and chunks:
+            logger.info("Response appears short; retrying generation once for completeness")
+            retry_query = (
+                query_text
+                + "\n\nYour previous answer was too brief. Provide a more complete summary covering all relevant points from the context."
+            )
+            response, generation_metrics = generator.generate_response(
+                query=retry_query,
+                context_chunks=chunks,
+                conversation_history=conversation_history,
+            )
+
+        metrics.generation_time_ms = generation_metrics.generation_time_ms
+        metrics.total_time_ms = int((datetime.utcnow() - overall_start).total_seconds() * 1000)
+        metrics.completion_tokens = generation_metrics.completion_tokens
+        metrics.total_tokens = generation_metrics.total_tokens
 
         # Link query and response
         response.query_id = query.query_id
@@ -295,15 +334,40 @@ def answer_query(
             f"(total messages: {len(conversation_history) + 2})"
         )
 
-        return response.content
+        # Append lightweight metrics summary for UI visibility
+        metrics_summary = (
+            f"\n\n---\n"
+            f"Retrieval: {metrics.retrieval_time_ms} ms | "
+            f"Generation: {metrics.generation_time_ms} ms | "
+            f"Total: {metrics.total_time_ms} ms | "
+            f"Chunks: {metrics.retrieved_chunks} | "
+            f"Avg score: {metrics.average_score:.3f} | "
+            f"Tokens (approx): {metrics.total_tokens}"
+        )
+
+        return response.content + metrics_summary
 
     except Exception as e:
         error_msg = f"Error processing query: {e}"
         logger.error(error_msg, exc_info=True)
+        # On error we keep metrics as-is (may be partially filled) but
+        # ensure token counts are non-negative.
+        metrics.total_time_ms = max(
+            metrics.total_time_ms,
+            int((datetime.utcnow() - overall_start).total_seconds() * 1000),
+        )
+        metrics.total_tokens = max(metrics.total_tokens, 0)
         return (
             "I apologize, but I encountered an error processing your question. "
             "Please try again or rephrase your question."
         )
+
+    finally:
+        # Always log metrics so session aggregates (e.g. total tokens) remain accurate
+        try:
+            metrics_logger.log_query(session_id=session_id, metrics=metrics)
+        except Exception as log_err:
+            logger.error(f"Failed to log query metrics: {log_err}")
 
 
 def main():

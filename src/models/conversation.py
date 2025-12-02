@@ -3,7 +3,7 @@ Data models for queries, responses, and conversations.
 """
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
 from uuid import uuid4
 
 
@@ -95,3 +95,63 @@ class Conversation:
     def get_history(self) -> list[dict]:
         """Get conversation history (last 10 messages)."""
         return self.messages[-10:]
+
+
+@dataclass
+class QueryMetrics:
+    """Performance and usage metrics for a single query/response cycle."""
+
+    embedding_time_ms: int = 0
+    retrieval_time_ms: int = 0
+    generation_time_ms: int = 0
+    total_time_ms: int = 0
+    retrieved_chunks: int = 0
+    average_score: float = 0.0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.embedding_time_ms < 0:
+            raise ValueError("embedding_time_ms must be non-negative")
+        if self.retrieval_time_ms < 0:
+            raise ValueError("retrieval_time_ms must be non-negative")
+        if self.generation_time_ms < 0:
+            raise ValueError("generation_time_ms must be non-negative")
+        if self.total_time_ms < 0:
+            raise ValueError("total_time_ms must be non-negative")
+        if self.retrieved_chunks < 0:
+            raise ValueError("retrieved_chunks must be non-negative")
+        if self.prompt_tokens < 0 or self.completion_tokens < 0 or self.total_tokens < 0:
+            raise ValueError("Token counts must be non-negative")
+        if self.cost_usd < 0:
+            raise ValueError("cost_usd must be non-negative")
+
+
+@dataclass
+class IndexingMetrics:
+    """Performance metrics for a document indexing run."""
+
+    duration_ms: int = 0
+    document_count: int = 0
+    total_bytes: int = 0
+    total_extracted_chars: int = 0
+
+    def __post_init__(self) -> None:
+        if self.duration_ms < 0:
+            raise ValueError("duration_ms must be non-negative")
+        if self.document_count < 0 or self.total_bytes < 0 or self.total_extracted_chars < 0:
+            raise ValueError("Indexing aggregate values must be non-negative")
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize indexing metrics for UI/logging."""
+        return {
+            "duration_ms": self.duration_ms,
+            "document_count": self.document_count,
+            "total_bytes": self.total_bytes,
+            "total_extracted_chars": self.total_extracted_chars,
+        }
+
+
+    

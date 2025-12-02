@@ -20,6 +20,7 @@ class Document:
     chunk_count: int = 0
     status: str = "pending"  # pending, processing, indexed, failed
     error_message: Optional[str] = None
+    title: Optional[str] = None
 
     def __post_init__(self):
         """Validate document data."""
@@ -86,6 +87,8 @@ class IndexingStatus:
     failed_documents: int = 0
     total_chunks: int = 0
     last_indexed: Optional[datetime] = None
+    # Optional metrics field, populated at runtime where available
+    indexing_metrics: Optional["IndexingMetrics"] = None  # type: ignore[name-defined]
 
     @property
     def is_ready(self) -> bool:

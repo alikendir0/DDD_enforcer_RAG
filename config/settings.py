@@ -31,8 +31,9 @@ DISTANCE_METRIC = "cosine"
 
 # Retrieval Configuration
 TOP_K_MIN = 3
-TOP_K_MAX = 5
-TOP_K_DEFAULT = 3
+TOP_K_MAX = 6
+TOP_K_DEFAULT = int(os.getenv("TOP_K_DEFAULT", "5"))
+MIN_SIMILARITY_THRESHOLD = float(os.getenv("MIN_SIMILARITY_THRESHOLD", "0.0"))
 
 # Conversation Configuration
 MAX_CONVERSATION_HISTORY = 10  # messages (5 exchanges)
