@@ -147,17 +147,21 @@ class Generator:
             "6. When referencing information, be specific about which document excerpt it came from"
         )
 
-        # Add context chunks
+        # Add context chunks, skipping empty/None-like contents
         if context_chunks:
             prompt_parts.append("\n\nContext from documents:")
             for i, chunk in enumerate(context_chunks, 1):
+                # Skip chunks with no real content
+                if not chunk.content or str(chunk.content).strip().lower() == "none":
+                    continue
+
                 # Extract just the filename from the full path
                 import os
                 filename = os.path.basename(chunk.document_path)
                 prompt_parts.append(
                     f"\n--- Document excerpt {i} (from {filename}, chunk {chunk.chunk_index}) ---"
                 )
-                prompt_parts.append(chunk.content)
+                prompt_parts.append(str(chunk.content))
 
         # Add conversation history if available
         if conversation_history:
@@ -167,9 +171,14 @@ class Generator:
                 content = msg.get("content", "")
                 prompt_parts.append(f"\n{role.capitalize()}: {content}")
 
-        # Add current query
+        # Add current query and clarify behavior when some excerpts are empty
         prompt_parts.append(f"\n\nCurrent question: {query}")
-        prompt_parts.append("\nAnswer:")
+        prompt_parts.append(
+            "\nWhen answering, if some document excerpts appear empty or say 'None', "
+            "ignore those and use the excerpts that contain real text. "
+            "Only say 'I cannot find information about this in the provided documents.' "
+            "if *all* usable excerpts truly lack the needed information.\nAnswer:"
+        )
 
         return "".join(prompt_parts)
 
