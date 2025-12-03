@@ -1,15 +1,7 @@
 {
-<<<<<<< HEAD
-  "top_k": 3,
-  "chunk_size": 256,
-  "chunk_overlap": 64,
-  "show_context_enabled": true,
-  "last_modified": 1764743772.9218624
-=======
   "top_k": 10,
   "chunk_size": 640,
   "chunk_overlap": 32,
   "show_context_enabled": true,
   "last_modified": 1764710080.7630668
->>>>>>> 9a9adf1d84600ea0fee7802175ee664d12e4a15e
 }
