@@ -3,11 +3,11 @@ Chunker service for splitting documents into fixed-size token chunks.
 """
 from typing import List
 
-import tiktoken
+from transformers import AutoTokenizer
 
 from src.models.document import Document, Chunk
 from src.utils.logger import get_logger
-from config.settings import CHUNK_SIZE, CHUNK_OVERLAP
+from config.settings import CHUNK_SIZE, CHUNK_OVERLAP, EMBEDDING_MODEL
 
 logger = get_logger(__name__)
 
@@ -17,7 +17,7 @@ class Chunker:
 
     def __init__(self, chunk_size: int = CHUNK_SIZE, chunk_overlap: int = CHUNK_OVERLAP):
         """
-        Initialize chunker with tiktoken encoding.
+        Initialize chunker with tokenizer matching the embedding model.
 
         Args:
             chunk_size: Maximum tokens per chunk (default from settings)
@@ -25,9 +25,10 @@ class Chunker:
         """
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-        # Use cl100k_base encoding (used by GPT-4, compatible tokenizer)
-        self.encoding = tiktoken.get_encoding("cl100k_base")
+        # Use tokenizer matching the embedding model
+        self.tokenizer = AutoTokenizer.from_pretrained(EMBEDDING_MODEL)
         logger.info(f"Chunker initialized with chunk_size={chunk_size}, overlap={chunk_overlap}")
+        logger.info(f"Using tokenizer from: {EMBEDDING_MODEL}")
 
     def chunk_document(self, document: Document) -> List[Chunk]:
         """
@@ -44,7 +45,7 @@ class Chunker:
             return []
 
         # Tokenize the entire content
-        tokens = self.encoding.encode(document.content)
+        tokens = self.tokenizer.encode(document.content, add_special_tokens=False)
         total_tokens = len(tokens)
 
         chunks = []
@@ -64,10 +65,10 @@ class Chunker:
             chunk_tokens = tokens[i:chunk_end]
 
             # Decode tokens back to text
-            chunk_text = self.encoding.decode(chunk_tokens)
+            chunk_text = self.tokenizer.decode(chunk_tokens, skip_special_tokens=True)
 
-            # Find character positions in original text
-            start_char = len(self.encoding.decode(tokens[:i]))
+            # Find character positions (approximate)
+            start_char = len(self.tokenizer.decode(tokens[:i], skip_special_tokens=True))
             end_char = start_char + len(chunk_text)
 
             # Create chunk object

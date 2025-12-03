@@ -156,7 +156,7 @@ def index_documents(
 
     # Initialize processors
     doc_processor = DocumentProcessor()
-    chunker = Chunker(chunk_size=chunk_size)
+    chunker = Chunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
 
     logger.info(f"Using chunk_size={chunk_size}, chunk_overlap={chunk_overlap}")
 
