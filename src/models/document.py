@@ -49,14 +49,14 @@ class Chunk:
         """Validate chunk data."""
         if self.chunk_index < 0:
             raise ValueError("Chunk index must be non-negative")
-        if self.token_count <= 0 or self.token_count > 512:
-            raise ValueError("Token count must be between 1 and 512")
+        if self.token_count <= 0 or self.token_count > 1024:
+            raise ValueError("Token count must be between 1 and 1024")
         if self.start_char >= self.end_char:
             raise ValueError("Start char must be less than end char")
         if not self.content:
             raise ValueError("Content cannot be empty")
-        if self.embedding is not None and len(self.embedding) != 384:
-            raise ValueError("Embedding must be 384-dimensional")
+        if self.embedding is not None and len(self.embedding) not in [384, 768]:
+            raise ValueError("Embedding must be 384-dimensional or 768-dimensional")
 
 
 @dataclass
@@ -71,8 +71,8 @@ class Embedding:
 
     def __post_init__(self):
         """Validate embedding data."""
-        if len(self.vector) != 384:
-            raise ValueError("Vector must be 384-dimensional")
+        if len(self.vector) not in [384, 768]:
+            raise ValueError("Vector must be 384-dimensional or 768-dimensional")
         if not all(isinstance(v, (int, float)) for v in self.vector):
             raise ValueError("Vector must contain only numeric values")
 

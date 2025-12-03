@@ -1,0 +1,15 @@
+# Benchmark results and outputs
+results/
+
+# Test ChromaDB
+test_chroma_db/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Temporary files
+*.tmp
+*.log

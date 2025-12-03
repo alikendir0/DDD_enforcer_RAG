@@ -30,6 +30,9 @@ vector_store: Optional[VectorStore] = None
 retriever: Optional[Retriever] = None
 generator: Optional[Generator] = None
 conversation_manager: Optional[ConversationManager] = None
+stats_tracker = None  # Will be initialized after vector_store
+config_manager = None  # Will be initialized with configuration loading
+file_manager = None  # Will be initialized with vector_store reference
 
 
 def initialize_services():
@@ -39,9 +42,13 @@ def initialize_services():
     Raises:
         ValueError: If GEMINI_API_KEY is not set
     """
-    global embedder, vector_store, retriever, generator, conversation_manager
+    global embedder, vector_store, retriever, generator, conversation_manager, stats_tracker, config_manager, file_manager
 
     logger.info("Initializing RAG Chatbot services...")
+
+    # Ensure data/documents/ directory exists on startup (T047)
+    DOCUMENTS_FOLDER.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Documents directory ensured: {DOCUMENTS_FOLDER}")
 
     # Check API key
     if not GEMINI_API_KEY:
@@ -66,39 +73,74 @@ def initialize_services():
     # Initialize conversation manager (max 10 messages = 5 exchanges)
     conversation_manager = ConversationManager(max_messages=10)
 
+    # Initialize stats tracker with vector store reference
+    from src.services.stats_tracker import StatsTracker
+    stats_tracker = StatsTracker(vector_store=vector_store)
+
+    # Initialize config manager and load configuration
+    from src.services.config_manager import ConfigManager
+    config_manager = ConfigManager()
+    config_manager.load_config()
+
+    # Initialize file manager with vector store reference
+    from src.services.file_manager import FileManager
+    file_manager = FileManager(
+        documents_folder=str(DOCUMENTS_FOLDER),
+        vector_store=vector_store
+    )
+
     logger.info("All services initialized successfully")
 
 
-def index_documents(documents_folder: Optional[str] = None) -> IndexingStatus:
+def index_documents(
+    documents_folder: Optional[str] = None,
+    chunk_size: Optional[int] = None,
+    chunk_overlap: Optional[int] = None
+) -> IndexingStatus:
     """
     Index all documents from the specified folder.
 
     Orchestrates:
     1. Load documents from folder
-    2. Chunk documents
+    2. Chunk documents (using configured chunk_size/overlap if not specified)
     3. Embed chunks
     4. Store embeddings in vector store
 
     Args:
         documents_folder: Path to folder containing documents (default: from settings)
+        chunk_size: Token count per chunk (overrides config if provided)
+        chunk_overlap: Overlapping tokens between chunks (overrides config if provided)
 
     Returns:
         IndexingStatus with summary of indexing operation
     """
-    global embedder, vector_store
+    global embedder, vector_store, config_manager
 
     # Ensure services are initialized
-    if vector_store is None or embedder is None:
+    if vector_store is None or embedder is None or config_manager is None:
         initialize_services()
-    
+
     # Type assertions for Pylance
     assert embedder is not None
     assert vector_store is not None
+    assert config_manager is not None
+
+    # Get chunk parameters from config if not provided
+    if chunk_size is None or chunk_overlap is None:
+        config = config_manager.get_current_config()
+        if chunk_size is None:
+            chunk_size = config.chunk_size
+        if chunk_overlap is None:
+            chunk_overlap = config.chunk_overlap
 
     if documents_folder is None:
         documents_folder = str(DOCUMENTS_FOLDER)
 
     logger.info(f"Starting document indexing from: {documents_folder}")
+
+    # Clear existing embeddings before re-indexing
+    logger.info("Clearing existing embeddings from vector store...")
+    vector_store.clear()
 
     # Verify folder exists
     folder_path = Path(documents_folder)
@@ -114,7 +156,9 @@ def index_documents(documents_folder: Optional[str] = None) -> IndexingStatus:
 
     # Initialize processors
     doc_processor = DocumentProcessor()
-    chunker = Chunker()
+    chunker = Chunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+
+    logger.info(f"Using chunk_size={chunk_size}, chunk_overlap={chunk_overlap}")
 
     # Load all documents
     logger.info("Loading documents from folder...")
@@ -200,39 +244,53 @@ def index_documents(documents_folder: Optional[str] = None) -> IndexingStatus:
 
 
 def answer_query(
-    query_text: str, session_id: str = "default", top_k: int = TOP_K_DEFAULT
-) -> str:
+    query_text: str,
+    session_id: str = "default",
+    top_k: Optional[int] = None,
+    return_context: bool = False
+) -> tuple[str, list[dict]] | str:
     """
     Answer a user query using RAG pipeline with conversation history.
 
     Orchestrates:
     1. Create Query object
-    2. Retrieve relevant chunks
+    2. Retrieve relevant chunks (using configured top_k if not specified)
     3. Get conversation history
     4. Generate response with context and history
-    5. Add exchange to conversation
-    6. Return response text
+    5. Track statistics (token usage, costs)
+    6. Add exchange to conversation
+    7. Return response text (and optionally context metadata)
 
     Args:
         query_text: User's question
         session_id: Session identifier (for conversation history)
-        top_k: Number of chunks to retrieve (3-5)
+        top_k: Number of chunks to retrieve (overrides config if provided)
+        return_context: If True, return (response_text, context_metadata)
 
     Returns:
-        Response text to display to user
+        Response text to display to user, or tuple of (response_text, context_metadata)
+        context_metadata is a list of dicts with chunk_text, score, document_name
     """
-    global vector_store, retriever, generator, conversation_manager
+    global vector_store, retriever, generator, conversation_manager, stats_tracker, config_manager
 
     # Ensure services are initialized
-    if (vector_store is None or retriever is None or 
-        generator is None or conversation_manager is None):
+    if (vector_store is None or retriever is None or
+        generator is None or conversation_manager is None or
+        stats_tracker is None or config_manager is None):
         initialize_services()
-    
+
     # Type assertions for Pylance
     assert vector_store is not None
     assert retriever is not None
     assert generator is not None
     assert conversation_manager is not None
+    assert stats_tracker is not None
+    assert config_manager is not None
+
+    # Get top_k from config if not provided
+    if top_k is None:
+        config = config_manager.get_current_config()
+        top_k = config.top_k
 
     # Validate input
     if not query_text or not query_text.strip():
@@ -269,7 +327,7 @@ def answer_query(
         )
 
         # Generate response with conversation context
-        response = generator.generate_response(
+        response, input_tokens, output_tokens = generator.generate_response(
             query=query_text,
             context_chunks=chunks,
             conversation_history=conversation_history
@@ -279,15 +337,30 @@ def answer_query(
         response.query_id = query.query_id
         query.response_id = response.response_id
 
+        # Track statistics (token usage and costs)
+        from config.settings import GEMINI_MODEL
+        stats_tracker.track_query_stats(
+            session_id=session_id,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            model_name=GEMINI_MODEL
+        )
+
+        # Track retrieval quality (successful if we got chunks)
+        stats_tracker.track_retrieval_quality(success=(len(chunks) > 0))
+
         # Add user query and assistant response to conversation history
         conversation_manager.add_message(session_id, "user", query_text)
         conversation_manager.add_message(session_id, "assistant", response.content)
 
-        # Log retrieval metadata
+        # Log retrieval metadata (NFR-008: Constitution compliance)
         if chunks:
+            chunk_ids = [chunk.chunk_id for chunk in chunks]
             logger.info(
-                f"Retrieved {len(chunks)} chunks with scores: "
-                f"{[f'{s:.3f}' for s in scores]}"
+                f"Retrieval operation - Query: '{query_text[:50]}...', "
+                f"Retrieved {len(chunks)} chunks (IDs: {chunk_ids}), "
+                f"Similarity scores: {[f'{s:.3f}' for s in scores]}, "
+                f"Timestamp: {query.timestamp}"
             )
 
         logger.debug(
@@ -295,15 +368,33 @@ def answer_query(
             f"(total messages: {len(conversation_history) + 2})"
         )
 
+        # Build context metadata if requested
+        if return_context and chunks:
+            import os
+            context_metadata = []
+            for chunk, score in zip(chunks, scores):
+                # Extract just the filename from the full path
+                filename = os.path.basename(chunk.document_path)
+                context_metadata.append({
+                    "chunk_text": chunk.content,
+                    "score": float(score),
+                    "document_name": filename,
+                    "chunk_index": chunk.chunk_index
+                })
+            return response.content, context_metadata
+
         return response.content
 
     except Exception as e:
         error_msg = f"Error processing query: {e}"
         logger.error(error_msg, exc_info=True)
-        return (
+        error_response = (
             "I apologize, but I encountered an error processing your question. "
             "Please try again or rephrase your question."
         )
+        if return_context:
+            return error_response, []
+        return error_response
 
 
 def main():

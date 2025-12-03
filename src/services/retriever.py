@@ -35,7 +35,7 @@ class Retriever:
 
         Args:
             query: User's question text
-            top_k: Number of chunks to retrieve (3-5)
+            top_k: Number of chunks to retrieve (1-10)
 
         Returns:
             Tuple of (retrieved_chunks, similarity_scores)
@@ -45,9 +45,9 @@ class Retriever:
             return [], []
 
         # Validate top_k range
-        if top_k < 3 or top_k > 5:
-            logger.warning(f"top_k={top_k} outside recommended range [3,5], clamping")
-            top_k = max(3, min(5, top_k))
+        if top_k < 1 or top_k > 10:
+            logger.warning(f"top_k={top_k} outside valid range [1,10], clamping")
+            top_k = max(1, min(10, top_k))
 
         # Embed the query
         logger.info(f"Retrieving chunks for query: '{query[:50]}...'")

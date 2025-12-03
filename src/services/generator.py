@@ -53,7 +53,7 @@ class Generator:
         query: str,
         context_chunks: List[Chunk],
         conversation_history: Optional[List[dict]] = None,
-    ) -> Response:
+    ) -> tuple[Response, int, int]:
         """
         Generate response using Gemini API with context.
 
@@ -63,7 +63,7 @@ class Generator:
             conversation_history: Previous messages (for multi-turn)
 
         Returns:
-            Response object with generated answer
+            Tuple of (Response object, input_tokens, output_tokens)
 
         Raises:
             GeneratorError: If API call fails after retries
@@ -74,14 +74,14 @@ class Generator:
             # Build prompt with context
             prompt = self._build_prompt(query, context_chunks, conversation_history)
 
-            # Call Gemini API with retry logic
-            response_text = self._call_gemini_with_retry(prompt)
+            # Call Gemini API with retry logic and get token counts
+            response_text, input_tokens, output_tokens = self._call_gemini_with_retry(prompt)
 
             # Calculate latency
             latency_ms = int((time.time() - start_time) * 1000)
 
-            # Estimate token count (rough approximation)
-            token_count = len(response_text.split())
+            # Use actual token count from API
+            token_count = output_tokens
 
             response = Response(
                 query_id="",  # Will be set by caller
@@ -94,25 +94,26 @@ class Generator:
 
             logger.info(
                 f"Generated response: {len(response_text)} chars, "
-                f"{latency_ms}ms latency"
+                f"{latency_ms}ms latency, "
+                f"{input_tokens} input tokens, {output_tokens} output tokens"
             )
 
-            return response
+            return response, input_tokens, output_tokens
 
         except Exception as e:
             latency_ms = int((time.time() - start_time) * 1000)
             error_msg = f"Failed to generate response: {str(e)}"
             logger.error(error_msg, exc_info=True)
 
-            # Return error response
-            return Response(
+            # Return error response with zero tokens
+            return (Response(
                 query_id="",
                 content="I apologize, but I encountered an error generating a response. Please try again.",
                 model_name=self.model_name,
                 latency_ms=latency_ms,
                 token_count=0,
                 error=error_msg,
-            )
+            ), 0, 0)
 
     def _build_prompt(
         self,
@@ -135,20 +136,33 @@ class Generator:
 
         # Add system instruction
         prompt_parts.append(
-            "You are a helpful assistant that answers questions based on the provided context. "
-            "If the context contains relevant information, use it in your answer. "
-            "If the context doesn't contain relevant information, answer using your general knowledge "
-            "and mention that the information isn't in the provided documents."
+            "You are a knowledgeable assistant that answers questions strictly based on the provided document context. "
+            "Your task is to:\n"
+            "1. Carefully read and analyze the provided document excerpts\n"
+            "2. Answer the question using ONLY information found in these excerpts\n"
+            "3. If the answer is in the context, provide a clear and complete response\n"
+            "4. If the context doesn't contain enough information to answer the question, respond with: "
+            "\"I cannot find information about this in the provided documents.\"\n"
+            "5. Never use external knowledge or make assumptions beyond what's explicitly stated in the context\n"
+            "6. When referencing information, be specific about which document excerpt it came from\n" 
+            "7. Make sure that if the user query is sumarizing a document you reply 'I cannot summarize documents but here is an attempt:'  \n"
         )
 
-        # Add context chunks
+        # Add context chunks, skipping empty/None-like contents
         if context_chunks:
             prompt_parts.append("\n\nContext from documents:")
             for i, chunk in enumerate(context_chunks, 1):
+                # Skip chunks with no real content
+                if not chunk.content or str(chunk.content).strip().lower() == "none":
+                    continue
+
+                # Extract just the filename from the full path
+                import os
+                filename = os.path.basename(chunk.document_path)
                 prompt_parts.append(
-                    f"\n--- Document excerpt {i} (from {chunk.document_path}) ---"
+                    f"\n--- Document excerpt {i} (from {filename}, chunk {chunk.chunk_index}) ---"
                 )
-                prompt_parts.append(chunk.content)
+                prompt_parts.append(str(chunk.content))
 
         # Add conversation history if available
         if conversation_history:
@@ -158,13 +172,18 @@ class Generator:
                 content = msg.get("content", "")
                 prompt_parts.append(f"\n{role.capitalize()}: {content}")
 
-        # Add current query
+        # Add current query and clarify behavior when some excerpts are empty
         prompt_parts.append(f"\n\nCurrent question: {query}")
-        prompt_parts.append("\nAnswer:")
+        prompt_parts.append(
+            "\nWhen answering, if some document excerpts appear empty or say 'None', "
+            "ignore those and use the excerpts that contain real text. "
+            "Only say 'I cannot find information about this in the provided documents.' "
+            "if *all* usable excerpts truly lack the needed information.\nAnswer:"
+        )
 
         return "".join(prompt_parts)
 
-    def _call_gemini_with_retry(self, prompt: str, max_retries: int = 3) -> str:
+    def _call_gemini_with_retry(self, prompt: str, max_retries: int = 3) -> tuple[str, int, int]:
         """
         Call Gemini API with exponential backoff retry.
 
@@ -175,7 +194,7 @@ class Generator:
             max_retries: Maximum number of retry attempts
 
         Returns:
-            Generated response text
+            Tuple of (response_text, input_tokens, output_tokens)
 
         Raises:
             GeneratorError: If all retries fail
@@ -189,7 +208,21 @@ class Generator:
                 if not response or not response.text:
                     raise GeneratorError("Empty response from Gemini API")
 
-                return response.text
+                # Extract token counts from usage_metadata if available
+                input_tokens = 0
+                output_tokens = 0
+                if hasattr(response, 'usage_metadata'):
+                    usage = response.usage_metadata
+                    input_tokens = getattr(usage, 'prompt_token_count', 0)
+                    output_tokens = getattr(usage, 'candidates_token_count', 0)
+                    logger.debug(f"Token usage: {input_tokens} input, {output_tokens} output")
+                else:
+                    # Fallback to estimation if usage_metadata not available
+                    logger.warning("usage_metadata not available, estimating token counts")
+                    input_tokens = len(prompt.split()) // 0.75  # rough estimate
+                    output_tokens = len(response.text.split()) // 0.75
+
+                return response.text, int(input_tokens), int(output_tokens)
 
             except Exception as e:
                 last_error = e
