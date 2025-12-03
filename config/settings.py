@@ -30,8 +30,8 @@ COLLECTION_NAME = "document_chunks"
 DISTANCE_METRIC = "cosine"
 
 # Retrieval Configuration
-TOP_K_MIN = 3
-TOP_K_MAX = 5
+TOP_K_MIN = 1
+TOP_K_MAX = 10
 TOP_K_DEFAULT = 3
 
 # Conversation Configuration

@@ -144,7 +144,8 @@ class Generator:
             "4. If the context doesn't contain enough information to answer the question, respond with: "
             "\"I cannot find information about this in the provided documents.\"\n"
             "5. Never use external knowledge or make assumptions beyond what's explicitly stated in the context\n"
-            "6. When referencing information, be specific about which document excerpt it came from"
+            "6. When referencing information, be specific about which document excerpt it came from\n" 
+            "7. Make sure that if the user query is sumarizing a document you reply 'I cannot summarize documents but here is an attempt:'  \n"
         )
 
         # Add context chunks, skipping empty/None-like contents
